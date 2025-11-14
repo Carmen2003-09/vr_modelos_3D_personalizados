@@ -12,6 +12,8 @@ const manager = new THREE.LoadingManager();
 
 let camera, scene, renderer, stats, object, loader, guiMorphsFolder, controls;
 let mixer;
+let sceneContainer;
+let modelEyeHeight = 1.6; // Altura de los ojos en metros (altura por defecto)
 
 const clock = new THREE.Clock();
 
@@ -42,6 +44,11 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xa0a0a0);
     scene.fog = new THREE.Fog(0xa0a0a0, 200, 1000);
+    
+    // Crear un grupo contenedor para ajustar la altura en VR
+    sceneContainer = new THREE.Group();
+    sceneContainer.name = 'SceneContainer';
+    scene.add(sceneContainer);
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 5);
     hemiLight.position.set(0, 200, 0);
@@ -62,12 +69,12 @@ function init() {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false }));
     mesh.rotation.x = - Math.PI / 2;
     mesh.receiveShadow = true;
-    scene.add(mesh);
+    sceneContainer.add(mesh);
 
     const grid = new THREE.GridHelper(2000, 20, 0x000000, 0x000000);
     grid.material.opacity = 0.2;
     grid.material.transparent = true;
-    scene.add(grid);
+    sceneContainer.add(grid);
 
     loader = new FBXLoader(manager);
     loadAsset(params.asset);
@@ -90,13 +97,24 @@ function init() {
     controls.target.set(0, 0, 0);
     controls.update();
     
-    // Deshabilitar controles cuando esté en VR
+    // Deshabilitar controles cuando esté en VR y ajustar altura de la cámara
     renderer.xr.addEventListener('sessionstart', () => {
         controls.enabled = false;
+        
+        // Ajustar la altura de la cámara en VR basándome en el tamaño del modelo
+        // modelEyeHeight se calcula cuando se carga el modelo (especialmente para Aula1)
+        // Representa la altura de los ojos de una persona (1.6m) ajustada al tamaño del modelo
+        
+        // Mover el contenedor de la escena hacia abajo para que la cámara esté a la altura deseada
+        // Esto hace que cuando la cámara VR esté en Y=0 (suelo), vea el modelo a la altura de los ojos
+        sceneContainer.position.y = -modelEyeHeight;
     });
     
     renderer.xr.addEventListener('sessionend', () => {
         controls.enabled = true;
+        
+        // Restaurar la posición original cuando se sale de VR
+        sceneContainer.position.y = 0;
     });
 
     window.addEventListener('resize', onWindowResize);
@@ -193,7 +211,7 @@ function loadAsset(asset) {
 
         });
 
-        scene.add(object);
+        sceneContainer.add(object);
 
         // Ajustar escala y cámara para el aula si es el modelo Aula o Aula1
         if (asset === 'Aula' || asset === 'Aula1') {
@@ -224,6 +242,27 @@ function loadAsset(asset) {
             box.setFromObject(object);
             const newCenter = box.getCenter(new THREE.Vector3());
             const newSize = box.getSize(new THREE.Vector3());
+            
+            // Calcular la altura de los ojos basándome en el tamaño del modelo
+            // La altura de los ojos de una persona promedio es ~1.6m
+            // Si el modelo está escalado, calculamos qué altura representa 1.6m en el espacio del modelo
+            // Usamos el tamaño Y del modelo como referencia para calcular la escala
+            // Asumimos que un aula típica tiene ~3m de altura, así que ajustamos proporcionalmente
+            const typicalRoomHeight = 3.0; // Altura típica de un aula en metros
+            const eyeHeightInRealWorld = 1.6; // Altura de los ojos en el mundo real (metros)
+            
+            // Si el modelo tiene una altura razonable (entre 2-10 metros en el espacio 3D),
+            // usamos esa altura como referencia. Si es muy grande o muy pequeño, usamos la altura estándar.
+            if (newSize.y > 0.1 && newSize.y < 100) {
+                // Calcular la altura de los ojos proporcional al tamaño del modelo
+                // Si el modelo tiene newSize.y de altura, y representa typicalRoomHeight metros,
+                // entonces eyeHeightInRealWorld metros = (eyeHeightInRealWorld / typicalRoomHeight) * newSize.y
+                const scaleFactor = newSize.y / typicalRoomHeight;
+                modelEyeHeight = eyeHeightInRealWorld * scaleFactor;
+            } else {
+                // Si el modelo tiene un tamaño inusual, usar altura estándar
+                modelEyeHeight = eyeHeightInRealWorld;
+            }
             
             // Agregar ventanas adicionales al aula (usar el nuevo centro)
             if (asset === 'Aula') {
